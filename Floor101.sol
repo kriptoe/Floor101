@@ -11,84 +11,77 @@ pragma solidity >=0.8.0 <0.9.0;
     import "./SVGNFT.sol";
     import "./HexStrings.sol";
 
-contract Pcash is ERC721Enumerable, Ownable  {
+contract Floor101 is ERC721Enumerable, Ownable  {
 
    using Strings for uint256;
    using HexStrings for uint160;  
    using Counters for Counters.Counter;
    Counters.Counter private _tokenIds;
+   bool public nftDisabled= false;    // used to disable burning of an nft if it is being used for lending   
+   uint256 private s_lastTimeStamp;  // to track the burn date
    mapping (address => uint256) public UserAddresses; // maps the user address to the NFT ID
    mapping (uint256 => mapping (address => bool))public locked; // true means locked for lending
+  
    uint256 totalLoans = 0;
    // address private mumbaiDaiAddress =  0x1B2278e4f8e9D7786ed305B0204db3107Efa3396;
    IERC20 paytoken ;//  = IERC20(mumbaiDaiAddress);
+   address public marketContractAddress ;//  = IERC20(mumbaiDaiAddress);   
    NFTSVG.SVGParams p;
 
-     struct Loan {
-        address owner;
-        uint256 endDate; 
-        bool isOpen;            // true = loan is open, false = loan has been closed
-        bool liquidated;        // false, set to true if loan is liquidated
-    }
- 
-   constructor(address dai) ERC721("FloorIZA", "flr") {
+    event mintEvent(address indexed sender, uint256 NFTid);
+
+   constructor(address dai, address market) ERC721("Floor101", "flr") {
        paytoken  =  IERC20(dai);
+       marketContractAddress=  market; 
+       s_lastTimeStamp = block.timestamp;
      }
 
-  // users can lend against the floor price of the token
-   function lend(uint256 tokenId) public {
-     require (ownerOf(tokenId)==msg.sender, "Not owner" ) ;
-     require (locked[tokenId][msg.sender]==false, "Locked lending" ) ;
-     locked[tokenId][msg.sender]=true ;             // lock the token for various reasons, ie cant sell on opensea
-     transferFrom(msg.sender, address(this), tokenId);  // transfer NFT to contract
-     paytoken.transfer(msg.sender, 95 ether );          // transfer 95 dai to lender
-     totalLoans ++;                                   // keep track of loans
-     uint loanDeadline = (block.timestamp + 2 weeks - block.timestamp);
-   }
-
-   function liquidate(uint256 tokenId) public onlyOwner {
-     require (ownerOf(tokenId)==address(this), "Not owner" ) ;
-     require (locked[tokenId][msg.sender]==true, "Locked lending" ) ;
-     burn(tokenId);  
-     totalLoans --;
-   }
-
-   // redeem the NFT used for lending
-   function redeem(uint256 tokenId) public payable{
-     require(paytoken.balanceOf(msg.sender ) == 96 ether, "Not enough dai");
-     require (msg.sender==address(this), "Not owner" ) ;
-     require (locked[tokenId][msg.sender]==true, "Locked lending" ) ;
-     transferFrom(address(this), msg.sender, tokenId);  // transfer NFT to contract   
-     locked[tokenId][msg.sender]==false;
-     totalLoans --;
-   }
-
-    // mint amount is the amount of US dollars being converted to pesos
-   function mintWithDAI(uint256 _USDCAmount) public payable {
-    require(_exists(UserAddresses[msg.sender]) == false, "Can only mint 1 NFT per address");
-    require(paytoken.balanceOf(msg.sender ) >= 100 ether, "Not enough dai");
-    paytoken.transferFrom(msg.sender, address(this), 100 ether);
-      _USDCAmount = _USDCAmount * 10 ** 18; // convert amount to 18 decimals
-      _tokenIds.increment();
+  // as there are 2 mint functions this saves repetition
+  function setMint() internal {
+      _tokenIds.increment();   
       p.id = uint2str(_tokenIds.current()) ;
       p.addr = (uint160(msg.sender)).toHexString(20);
       p.locked = false;
+      p.treasury = paytoken.balanceOf (address(this)) / 1 ether; 
       _safeMint(msg.sender, _tokenIds.current());
-      UserAddresses[msg.sender]=  _tokenIds.current();
+      emit mintEvent(msg.sender, _tokenIds.current());
+      UserAddresses[msg.sender]=  _tokenIds.current(); 
   }
 
-  // burns NFT and reimburses user with the floor backing of NFTs
+  // if the protocol reaches 101 mints, the contract can mint another 50 nfts which can be sold on the open market to add to the value of the treasury
+  // change the min on deploy
+   function ownerMint() public onlyOwner{
+      require(_tokenIds.current() > 0 && _tokenIds.current() < 101, "Max mint reached");
+      setMint();   
+   }
+
+    // mint amount is the amount of US dollars being converted to pesos
+   function mintWithDAI() public payable {
+    require( _tokenIds.current() < 101, "Max mint reached");    
+   // require(_exists(UserAddresses[msg.sender]) == false, "Can only mint 1 NFT per address");
+    require(paytoken.balanceOf(msg.sender ) >= 100 ether, "Not enough dai");
+    paytoken.transferFrom(msg.sender, address(this), 100 ether);
+    setMint();   
+  }
+
+  /* burns NFT and reimburses user with the floor backing of NFTs
+  // burn is closed most of the time to utilize treasury
   function burnNFT(uint256 tokenId) public payable {
       require (ownerOf(tokenId)==msg.sender, "Not owner" ) ;
        // burn the nft
       burn(tokenId);    
       paytoken.transfer(msg.sender,100 ether );
+  }  */
+
+  // Transfers all money from mint into the lending contract
+  function transferToMarket() public onlyOwner{
+    paytoken.transfer( marketContractAddress, paytoken.balanceOf (address(this)));
   }
 
   function tokenURI(uint256 id) public view override returns (string memory) {
       require(_exists(id), "not exist");
-      string memory name = string(abi.encodePacked('BET ID #',id.toString()));
-      string memory description = string(abi.encodePacked('PCASH first NFT stablecoin '));
+      string memory name = string(abi.encodePacked('ID #',id.toString()));
+      string memory description = string(abi.encodePacked('FLOOR 101 NFT owned liquidity'));
       string memory image = Base64.encode(bytes(NFTSVG.generateSVG(p)));
 
       return
@@ -102,10 +95,10 @@ contract Pcash is ERC721Enumerable, Ownable  {
                               name,
                               '", "description":"',
                               description,
-                              '", "external_url":"https://burnyboys.com/token/',
+                              '", "external_url":"https://floor101.com/',
                               id.toString(),
-                              '", "attributes": [{"trait_type": "pesos", "value": "',
-                             "bal",
+                              '", "attributes": [{"trait_type": "mint price", "value": "',
+                             "$100",
                               '"}], "owner":"',
                               (uint160(ownerOf(id))).toHexString(20),
                               '", "image": "',
@@ -118,10 +111,6 @@ contract Pcash is ERC721Enumerable, Ownable  {
               )
           );
   }
-
-
-
-
 
     function uint2str(uint _i) internal pure returns (string memory _uintAsString) {
       if (_i == 0) {
