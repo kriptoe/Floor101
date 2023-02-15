@@ -1,0 +1,48 @@
+@import url(https://fonts.googleapis.com/css?family=Roboto);
+@import url(https://fonts.googleapis.com/css?family=Bebas+Neue);
+.App {
+  text-align: center;
+}
+td img{
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+p {
+  text-align: left;
+  font-family: 'Roboto';
+  margin-left: 60px; 
+  font-size: 14px;  
+}
+h1{
+  margin-left: 50px;  
+  text-align: left;
+  font-family: 'Bebas Neue';
+  color: #990011FF !important;
+  margin-bottom: 0 !important;
+  font-size: 40px; 
+}
+h2{
+  margin-left: 50px;  
+  text-align: left;
+  font-family: 'Bebas Neue';
+  color: #990011FF !important;
+  margin-bottom: 0 !important;
+  font-size: 46px;
+}
+h4{
+  text-align: left;
+  font-family: 'Bebas Neue';
+  color: #990011FF !important;
+  margin: 0 !important;
+  font-size: 20px;
+}
+b{
+  font-size: 15px;
+}
+
+w3-container{
+  align-self: center;
+  background-color: rgb(31, 48, 95);
+  width: 400px; 
+}
