@@ -43,25 +43,60 @@ describe("🚩 FLOOR 101 Testing", function () {
     }); 
 
 
-
     describe(" Test Dai mint ", function () {
       it("Check mint() function works", async function () {
         const [ owner ] = await ethers.getSigners();
         console.log('\t'," 🧑 Tester Address: ", owner.address)
-        await daiContract.mint(owner.address, ethers.utils.parseEther("500") )
+        //await daiContract.mint(owner.address, ethers.utils.parseEther("50000") )
         const stakeResult = await daiContract.balanceOf(owner.address) + ""
-        console.log ("stake result ", stakeResult)
-       expect(stakeResult).to.equal("50000000000000000000000", "Error owner should have 500 dai"); 
+        console.log ("Amount DAI minted  ", stakeResult)
+       expect(stakeResult).to.equal("50000000000000000000000", "Error owner should have 50,000 dai"); 
       })
     })
 
-    describe(" Test NFT dai approval ", function () {
-      it("Check NFT approval function works", async function () {
+
+
+    describe(" Test transfer to marketplace contract works", function () {
+      it("Test transfer to marketplace contract works", async function () {
         const [ owner ] = await ethers.getSigners();
-        await daiContract.approve(owner.address, ethers.utils.parseEther("5000") )
-        console.log('\t',"🛰  Floor101 Contract approved to spend dai on address ", owner.address) 
+        await daiContract.approve(floorContract.address, ethers.utils.parseEther("50000") )
+        console.log('\t',"🛰  Floor101 Contract approved to spend dai on address ", owner.address)     
+        await floorContract.mintWithDAI( )
+        console.log('\t',"🛰  Floor101 minted a nft", owner.address) 
+        await floorContract.transferToMarket(ethers.utils.parseEther("100") ) 
+        console.log('\t',"100 dai transferred to market contract ", marketContract.address) 
       })
     })
+
+
+    describe(" Test lending  ", function () {
+      it("Check approve for lending works", async function () {
+          let nftID = 1
+          const [ owner ] = await ethers.getSigners();    
+          const nftBalance = await floorContract.balanceOf(owner.address)
+          console.log('\t',"nftBalance is  ", nftBalance)            
+          await floorContract.approve(marketContract.address, nftID)
+
+      })
+    })
+
+
+
+/* 
+    describe(" Test that 101 NFTs can be minted and create 10,100 dai in contract", function () {
+      it("Check NFT MINT function works", async function () {
+        const [ owner ] = await ethers.getSigners();
+        await daiContract.approve(floorContract.address, ethers.utils.parseEther("50000") )   
+        for (i=1; i < 102; i++)
+         { await floorContract.mintWithDAI( ) }
+        const nftBalance = await floorContract.balanceOf(owner.address)
+        console.log('\t',"NFT balance of ", owner.address, " is ", nftBalance)  
+        let mintBalance = await daiContract.balanceOf(floorContract.address)
+        console.log('\t',"Dai balance from minting is ", mintBalance, " is ", nftBalance)  
+        expect(mintBalance).to.equal("10100000000000000000000", "100 mints should create a balance of 10,100 dai");        
+      })
+    }) 
+
 /*
     describe(" Get listing fee function", function () {
       it("Check getListingFee() function returns ", async function () {
