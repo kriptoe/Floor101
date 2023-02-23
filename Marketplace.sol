@@ -6,10 +6,21 @@ pragma solidity ^0.8.4;
   import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
   import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
   import "@openzeppelin/contracts/access/Ownable.sol";
-  import "hardhat/console.sol";
   import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+  import "hardhat/console.sol";
 
 contract Marketplace is IERC721Receiver, ReentrancyGuard, Ownable {
+
+// -------------------------ERRORS -------------------------------
+  error notOwner();             // Not owner of NFT
+  error notEnoughDAI();         // user doesnt have enough DAI 
+  error alreadyListed();        // NFT already listed
+
+  /* ------------ EVENTS -------------------------------------*/
+  event lendEvent(uint256 indexed NFTid, address indexed sender,  uint256 loanAmount, uint256 fee, uint256 dueDate);
+  event repayLoanEvent(uint256 NFTid, address indexed sender,  uint256 loanAmount);
+  event saleListingEvent(address indexed sender, uint256 NFTid, uint256 price);
+  event buyNftEvent(uint256 indexed tokenId, address indexed buyer, uint256 indexed price);
 
   address payable holder;
   uint256 listingFee = 0.0006 ether;
@@ -29,22 +40,16 @@ contract Marketplace is IERC721Receiver, ReentrancyGuard, Ownable {
         uint256 endDate; 
         uint256 loanAmount;
         uint256 lendingFee;
-        bool locked;            // true = loan is open so NFT cant be used
         bool liquidated;        // false, set to true if loan is liquidated
     }
-
+  /* ------------ MAPPINGS -------------------------------------*/
    mapping(uint256 => List) public vaultItems;    //map nft id to Sales Listing struct
    mapping (uint256 => Loan ) public loans;      // map NFTid to loan struct
+   mapping (address => uint256 ) public hasLoan;     // to easily find if address has loan
+
    IERC20 paytoken ;//  = IERC20(mumbaiDaiAddress);
 
-
   ERC721Enumerable nft;
-
-  /* ------------ EVENTS -------------------------------------*/
-  event lendEvent(uint256 NFTid, address indexed sender,  uint256 loanAmount, uint256 fee, uint256 dueDate);
-  event repayLoanEvent(uint256 NFTid, address indexed sender,  uint256 loanAmount);
-  event saleListingEvent(address indexed sender, uint256 NFTid, uint256 price);
-  event NFTListCreated (uint256 indexed tokenId, address seller, address holder,uint256 price, bool sold);
 
    constructor(address dai) {
     paytoken  =  IERC20(dai);
@@ -62,76 +67,86 @@ contract Marketplace is IERC721Receiver, ReentrancyGuard, Ownable {
   // users can lend against the floor price of the token
   // IMPORTANT : requires approval from the nft contract
    function lend(uint256 tokenId, uint256 loanLength) public payable nonReentrant{
-       require (nft.ownerOf(tokenId)==msg.sender, "Not owner" ) ;  
-      console.log ("loan amount -------------------------------------------------------- ", loanLength);      
+    if (nft.ownerOf(tokenId)!=msg.sender)
+        revert notOwner();
+      
     if (loanLength == 4)
-    {require(msg.value == lendingFee * 2, "Please transfer 0.0012 crypto to pay listing fee"); 
-       console.log ("loan amount = 44444 -------------------------------------------------------- ", loanLength);  }        
+    {require(msg.value == lendingFee * 2, "Please transfer 0.0012 crypto to pay listing fee");   }        
     else {
       require(msg.value == lendingFee , "Please transfer 0.0006 crypto to pay listing fee");
     }        
      loans[tokenId].owner = msg.sender;
-     loans[tokenId].endDate = loanLength * 604800 + block.timestamp; // 1209600;  // 2 weeks from now 604800 = 1 week
-     loans[tokenId].locked = true;                 // so we know the nft is in the lending contract
+     loans[tokenId].endDate = loanLength; // * 604800 + block.timestamp; // 1209600;  // 2 weeks from now 604800 = 1 week
      loans[tokenId].liquidated = false;
      loans[tokenId].loanAmount = maxLoan;     
      loans[tokenId].lendingFee = 1 ether; 
-     console.log ("loan amount -------------- ", loans[tokenId].loanAmount);
      nft.transferFrom(msg.sender, address(this), tokenId);         // transfer NFT to contract  
-     paytoken.transfer(msg.sender, maxLoan );          // transfer maxloan amount to lender                                  // keep track of loans
+     paytoken.transfer(msg.sender, maxLoan );          // transfer maxloan amount to lender  
+     hasLoan[msg.sender] =  tokenId;               // maps address to ID so we know it has a loan
+     // console.log("las loan ------------------------------- ",tokenId);
      emit lendEvent( tokenId, msg.sender, maxLoan, lendingFee, loans[tokenId].endDate );
    }
 
-  // TRhis function checks that the liquidation date has occurred
+  // This function checks that the liquidation date has occurred
   // as the NFT is already owned by the contract we set a sale price and list it on our marketplace
   function liquidate (uint256 tokenId, uint256 price) public {
       require (loans[tokenId].endDate < block.timestamp,"Loan still active");
-      require(price > 110, "Amount must be higher than 110");
+      require(price > maxLoan, "Amount must be higher than 100");  // cant sell a liquidated NFT for less than floor
+
       require(vaultItems[tokenId].tokenId == 0, "NFT already listed");
-      vaultItems[tokenId] =  List(tokenId, payable(msg.sender), payable(address(this)), price, false);
+      vaultItems[tokenId] =  List(tokenId, payable(address(this)), payable(address(this)), price, false);  // list token for sale with seller address as the address of contract
+      hasLoan[msg.sender] =  0;      // 0 means that address no longer has a loan
       emit saleListingEvent(loans[tokenId].owner , tokenId,  price);
   }
 
-   // have to approve market contract with dai contract
+  // have to approve market contract with dai contract
     function repayLoan(uint256 tokenId) public payable nonReentrant {
-      uint256 amount = loans[tokenId].loanAmount;
-      console.log("pay back DAI amount ----------------------- ", amount);
-      console.log("lender dai balance ----------------------- ", paytoken.balanceOf(msg.sender ));    
-      require(paytoken.balanceOf(msg.sender ) >= loans[tokenId].loanAmount , "Not enough dai");
+      uint256 amount = loans[tokenId].loanAmount;  
+      if(paytoken.balanceOf(msg.sender ) <= loans[tokenId].loanAmount)
+         revert notEnoughDAI();
       require(loans[tokenId].owner == msg.sender, "NFT not yours"); //require the loan was made from this sender address
       paytoken.transferFrom(msg.sender, address(this), amount);
       nft.transferFrom(address(this), msg.sender, tokenId); // transfer NFT to contract
-      loans[tokenId].locked = false;
+      hasLoan[msg.sender] =  0;      // 0 means that address no longer has a loan
       emit repayLoanEvent(tokenId, msg.sender, amount);
   } 
 
   function listSaleFloor101Treasury(uint256 tokenId, uint256 price) public onlyOwner {
       require(vaultItems[tokenId].tokenId == 0, "NFT already listed");
-      require(price > 110, "Amount must be higher than 110");
+      require(price > maxLoan, "Amount must be higher than 110");
       vaultItems[tokenId] =  List(tokenId, payable(msg.sender), payable(address(this)), price, false);
-      emit NFTListCreated(tokenId, msg.sender, address(this), price, false);
+      emit saleListingEvent(msg.sender, tokenId,  price);      
   }
 
   // List for sale on Marketplace
   // IMPORTANT : requires approval from the nft contract
   function listSale(uint256 tokenId, uint256 price) public payable nonReentrant {
-      require(nft.ownerOf(tokenId) == msg.sender, "NFT not yours");
-      require(vaultItems[tokenId].tokenId == 0, "NFT already listed");
+        if (nft.ownerOf(tokenId) != msg.sender)
+            revert notOwner();
+
+        if (vaultItems[tokenId].tokenId != 0)
+            revert alreadyListed();
+
       require(price > 0, "Amount must be higher than 0");
       require(msg.value == listingFee, "Please transfer 0.0006 crypto to pay listing fee");
       vaultItems[tokenId] =  List(tokenId, payable(msg.sender), payable(address(this)), price, false);
       nft.transferFrom(msg.sender, address(this), tokenId);
       emit saleListingEvent(msg.sender, tokenId,  price);
-      emit NFTListCreated(tokenId, msg.sender, address(this), price, false);
   }
 
   function buyNft(uint256 tokenId) public payable nonReentrant {
-      uint256 price = vaultItems[tokenId].price * 10 ** 18;
-      require(paytoken.balanceOf(msg.sender ) >= price, "Not enough dai");
+      uint256 price = vaultItems[tokenId].price;
+
+      if(paytoken.balanceOf(msg.sender ) < price)
+         revert notEnoughDAI();
+
       vaultItems[tokenId].seller.transfer(msg.value);
+      paytoken.transferFrom(msg.sender, vaultItems[tokenId].seller, price);  // transfer the dai to the seller address
       nft.transferFrom(address(this), msg.sender, tokenId);
+
       vaultItems[tokenId].sold = true;
       delete vaultItems[tokenId];
+      emit buyNftEvent(tokenId, msg.sender, price) ; 
   }
 
   function cancelSale(uint256 tokenId) public nonReentrant {
@@ -141,8 +156,7 @@ contract Marketplace is IERC721Receiver, ReentrancyGuard, Ownable {
   }
   
   function getPrice(uint256 tokenId) public view returns (uint256) {
-      uint256 price = vaultItems[tokenId].price;
-      return price;
+      return vaultItems[tokenId].price;
   }
 
  function nftListings() public view returns (List[] memory) {
@@ -173,6 +187,12 @@ contract Marketplace is IERC721Receiver, ReentrancyGuard, Ownable {
     function withdraw() public payable onlyOwner() {
       require(payable(msg.sender).send(address(this).balance));
     }
+
+
+     // Transfer DAI to multisig for investment strategies
+  function transferToMultisig(uint256 amount, address multisigAddress) public onlyOwner{
+    paytoken.transfer( multisigAddress, amount);
+  }
 
  // upfront fee for taking a loan
  function setLoanFee(uint256 _amount) public onlyOwner{
