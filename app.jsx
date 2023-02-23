@@ -1,6 +1,6 @@
 //import Portis from "@portis/web3";
 import WalletConnectProvider from "@walletconnect/web3-provider";
-import { Alert, Button, Col, List, Menu, Row, InputNumber, Card, Divider,  Radio} from "antd";
+import { Alert, Button, Col, List, Menu, Row, InputNumber, Dropdown, Space, Divider,  Radio} from "antd";
 import "antd/dist/antd.css";
 import Authereum from "authereum";
 import {
@@ -188,19 +188,18 @@ function App(props) {
   const mainnetContracts = useContractLoader(mainnetProvider, contractConfig);
 
   const marketAddy=  readContracts && readContracts.Marketplace && readContracts.Marketplace.address;
+  const floorAddy=  readContracts && readContracts.Floor101 && readContracts.Floor101.address;
 
   // const marketContractAddress = useContractReader(readContracts, "Marketplace", "address");
   const balance = useContractReader(readContracts, "Floor101", "balanceOf", [address]);
-   const yourBalance = balance && balance.toNumber && balance.toNumber();
-  const floorDaiBalance = useContractReader(readContracts, "Floor101", "getDaiContractBalance"); 
-  const id = useContractReader(readContracts, "Floor101", "tokenOfOwnerByIndex", 0);
+  const yourBalance = balance && balance.toNumber && balance.toNumber();
 
+  const hasLoan = useContractReader(readContracts, "Marketplace", "hasLoan", [address]);
   const [yourCollectibles, setYourCollectibles] = useState();
+  const [nftSales, setNFTSales] = useState();
 
-  let s_total_nfts =  useContractReader(readContracts, "Floor101", "totalSupply");  
-  let s_total_usdc =  useContractReader(readContracts, "Floor101", "getUSDCContractBalance");  
+  let s_total_nfts =  useContractReader(readContracts, "Floor101", "totalSupply");   
    
-  const [saleNFTID, setSaleNFTID] = useState();
   const [lendButton, setLendButton] = useState(false);
   const [approveButton, setApproveButton] = useState(false); 
 
@@ -209,10 +208,16 @@ function App(props) {
   const mintEvents = useEventListener(readContracts, "Floor101", "mintEvent", localProvider, 1);
   const lendEvent = useEventListener(readContracts, "Marketplace", "lendEvent", localProvider, 1);
   const repayLoanEvent = useEventListener(readContracts, "Marketplace", "repayLoanEvent", localProvider, 1);  
-  
-  const saleItems =  useContractReader(readContracts, "Marketplace", "nftListings");  
+  const buyNftEvent = useEventListener(readContracts, "Marketplace", "buyNftEvent", localProvider, 1);  
+    
+  const daiBalance =  useContractReader(readContracts, "Dai", "balanceOf", [marketAddy]);
+  const daiBalance2 =  useContractReader(readContracts, "Dai", "balanceOf", [floorAddy]);  
+  // const floorBalance =  useContractReader(readContracts, "Floor101", "getDaiContractBalance");  
 
-  let daiBalance =  useContractReader(readContracts, "Dai", "balanceOf", "0x99bbA657f2BbC93c02D617f8bA121cB8Fc104Acf");
+  let  balance2 = useContractReader(readContracts, "Floor101", "balanceOf", [marketAddy]);
+
+  const salesBalance = balance2 && balance2.toNumber && balance2.toNumber();
+
   // If you want to call a function on a new block
   useOnBlock(mainnetProvider, () => {
     console.log(`⛓ A new mainnet block is here: ${mainnetProvider._lastBlockNumber}`);
@@ -257,6 +262,7 @@ const approve = async () =>{
   
 }
 
+// displays NFTs that are minted
   useEffect(() => {
     const updateYourCollectibles = async () => {
       const collectibleUpdate = [];
@@ -281,18 +287,32 @@ const approve = async () =>{
     updateYourCollectibles();
   }, [address, yourBalance]);
 
-  const getSales = async () =>{ 
-    try {
-      const salesUpdate = [];
-      const jsonManifestString = atob(saleItems.toString())
-      const jsonManifest = JSON.parse(jsonManifestString);
-      console.log
-    //  {saleItems[0][1] && saleItems[0][1].toString()}
-    } catch (e) {
-      console.log(e);
-    }
-  }
-
+// displays NFTs that are minted
+  useEffect(() => {
+    const updateNFTSales = async () => {
+      const collectibleUpdate = [];
+ 
+      for (let tokenIndex = 0; tokenIndex < salesBalance; tokenIndex++) {
+        try {
+          const tokenId = await readContracts.Floor101.tokenOfOwnerByIndex(marketAddy, tokenIndex);
+          let tokenURI = await readContracts.Floor101.tokenURI(tokenId);
+          let prc= await readContracts.Marketplace.getPrice(tokenId); 
+          const jsonManifestString = atob(tokenURI.substring(29))
+          try {
+            const jsonManifest = JSON.parse(jsonManifestString);
+            collectibleUpdate.push({ price: prc, id: tokenId, uri: tokenURI, owner: address,  ...jsonManifest });
+          } catch (e) {
+            console.log(e);
+          }
+        } catch (e) {
+          console.log(e);
+        }
+      }
+      setNFTSales(collectibleUpdate.reverse());
+    };
+    updateNFTSales();
+  }, [marketAddy, salesBalance]);
+  
 
   const [NFTid, setNFTid] = useState("0");
   const [nftSalePrice, setNFTSalePrice] = useState("0"); 
@@ -514,6 +534,16 @@ const approve = async () =>{
            Lend
             </Link>
           </Menu.Item> 
+          <Menu.Item key="/repay">
+            <Link
+              onClick={() => {
+                setRoute("/repay");
+              }}
+              to="/repay"
+            >
+             Repay
+            </Link>
+          </Menu.Item>  
           <Menu.Item key="/about">
             <Link
               onClick={() => {
@@ -544,19 +574,20 @@ const approve = async () =>{
             </Link>
           </Menu.Item>         
         </Menu>
-
-        <Switch>
-     <Route exact path="/">
-       <div style={{ width: 400, margin: "auto"}}>
-      <div id="centerWrapper" style={{ padding: 16 }}>
-      <div><h2>MINT FLOOR 101 nft</h2></div>
-      <p> <b>NFTs Minted : </b>{ s_total_nfts && s_total_nfts.toString()}<br />
-      <b>Available : </b>{(101- s_total_nfts).toString()}<br />
-      <b>Mint price : </b>$100 DAI<br />
-      <b>MAX LTV : </b> 100%
-       </p>
+<Switch>
+<Route exact path="/">
+ <div style={{ width: 480, margin: "auto"}}>
+ <div id="centerWrapper" style={{ padding: 16 }}>
+ <div><h2>MINT FLOOR 101 nft</h2></div>
+ <p>NFT owned liquidity - each NFT owns an equal share of the treasury, including all money from minting. 1 NFT per wallet.
+ </p>
+ <p><b>NFTs Minted : </b>{ s_total_nfts && s_total_nfts.toString()}<br />
+ <b>Available : </b>{(500 - s_total_nfts).toString()}<br />
+ <b>Mint price : </b>$100 DAI<br />
+ <b>Dai in treasury : </b>${ daiBalance2 && ethers.utils.formatEther(daiBalance2.toString())}<br />
+ <b>MAX LTV : </b> 100%  </p> 
  <Button type="primary" shape="round" onClick={() => {
-           tx(writeContracts.Dai.approve(readContracts.Floor101.address, ethers.utils.parseEther("101")));
+           tx(writeContracts.Dai.approve(readContracts.Floor101.address, ethers.utils.parseEther("100")));
                   }}
                 > APPROVE</Button>{' '}
       <Button type="primary" shape="round" onClick={() => {tx(writeContracts.Floor101.mintWithDAI());}}>MINT NFT</Button>
@@ -614,8 +645,8 @@ const approve = async () =>{
           
   <Route exact path="/market">
   <div style={{ width: 480, margin: "auto", backgroundColor: "Off-White", border:2}}>
-   <h1>Lending V1</h1>
-  <p>Lending available 2 weeks after launch date.<br />
+   <h1>Lending v1</h1>
+  <p>Lending available when minted out or 7 days after launch date.<br />
    Lend 100% of floor value of your NFT. <br />
    Lending fee of 0.0006 eth ($1) to lend for 2 weeks and 0.0012 eth for 4 weeks.<br />
    Can only get liquidated by not repaying loan before end date.<br />
@@ -626,7 +657,7 @@ const approve = async () =>{
    Enter your NFT ID, select loan length (2 or 4 weeks) and click the approve button, once the transaction is approved 
    click on the lend button and the floor price of $100 dai will be sent to your wallet.
   
-   Available Dai in lending contract ${daiBalance && ethers.utils.formatEther(daiBalance)}<br /></p>
+   Available Dai in lending contract ${daiBalance && ethers.utils.formatEther(daiBalance)} </p>
 
  <InputNumber min={1} max={101} placeholder={"NFT ID"} onChange={onChange2} style={{width: 200 }} /><br />
  <Radio.Group onChange={onChange} value={value}>
@@ -649,15 +680,21 @@ const approve = async () =>{
                 }}
               />
  <Divider />
+</div>
+
+</Route>
+<Route exact path="/repay">
+ <div style={{ width: 460, margin: "auto", backgroundColor: "Off-White", border:2}}>
  <h1>Repay Loan</h1>
  <p> Enter the number of your NFT, click approve and then Repay Loan, 
- you will need to have at least $100 dai in your account to repay the loan</p>
- <Button onClick={() => {tx( writeContracts.Dai.approve(readContracts.Marketplace.address,  ethers.utils.parseEther("100")));}}>APPROVE </Button>
- <Button onClick={() =>{console.log("nft fi ---------------", NFTid);
-  tx( writeContracts.Marketplace.repayLoan(NFTid))}}>
+ you will need to have at least $200 dai in your account to repay the loan<br />
+ Loans for {address} are NFTID {hasLoan && hasLoan.toString() }</p>
+ <InputNumber min={1} max={101} placeholder={"NFT ID"} onChange={onChange2} style={{width: 200, marginBottom: 10 }} /><br />
+ <Button type="primary" shape="round" onClick={() => {tx( writeContracts.Dai.approve(readContracts.Marketplace.address,  ethers.utils.parseEther("100")));}}>APPROVE </Button>{' '}
+ <Button type="primary" shape="round" onClick={() =>{tx( writeContracts.Marketplace.repayLoan(NFTid))}}>
  REPAY LOAN</Button>
 <br />
-<List bordered dataSource={repayLoanEvent}   
+<List dataSource={repayLoanEvent}   
                 renderItem={item => {
                   return (
                     <List.Item key={item[0] }>
@@ -668,60 +705,100 @@ const approve = async () =>{
                   );
                 }}
               />
+
      </div>
- 
-     <Button onClick={() => {tx( writeContracts.Marketplace.liquidate( NFTid, ethers.utils.parseEther("120")));}}> LIQUIDATE </Button>
-     <List bordered dataSource={listSaleEvents}   
-                renderItem={item => {
-                  return (
-                    <List.Item key={item[0] }>
-                      <span style={{ fontSize: 16, marginRight: 8 }}>NFTID #{item.args[1].toNumber()}</span>
-                      <span style={{ fontSize: 16, marginRight: 8 }}>Price ${ ethers.utils.formatEther( item.args[2] ) }</span><br />
-                      Address {item.args[0]}  
-                    </List.Item>
-                  );
-                }}
-              />
-</Route>
+    </Route>
  <Route exact path="/about">
- <div style={{ width: 420, margin: "auto", backgroundColor: "Off-White", border:2}}>
+ <div style={{ width: 520, margin: "auto", backgroundColor: "Off-White", border:2}}>
  <h1>About Floor 101</h1> 
- <p><b>Supply :</b> 101 NFTs<br />
-    <b>Price :</b> $100 DAI<br />
-    <b>Limit :</b> 1 per wallet<br />
-    <b>Lend :</b> 100% of your investment less $1 eth fee<br />
-    <b>Lending :</b> Available 2 weeks after first mint.</p>
-   <h1>Project Revenue</h1> 
-   <p>Loan fees and liquidations<br />
-     Investing DAI into Gains Network Staking and other stablecoin staking options<br />
-     Selling liquidated NFTs , Opensea Sales Royalties</p>
+ <p><b>Supply : </b>500 NFTs<br />
+    <b>Price : </b>$100 DAI<br />
+    <b>Limit : </b>1 per wallet<br />
+    <b>Lend : </b>100% of your investment less $1 eth fee<br />
+    <b>Lending : </b> Available 2 weeks after first mint or earlier if minted out.<br />
+    Floor 101 is an SVG NFT which lives on the blockchain, not on a Pinata server. SVGs are dynamic (easily updated). NFT advertising?
+    Dynamic NFTs are just in their infancy and we will be pushing the boundaries of innovation with them 
+    in future releases.
+    </p>
+   <h1>100% LTV? HOW?</h1> 
+    <p>NFT owned liquidity (NOL) Every NFT owns an equal share of the treasury, which means we can safely
+    lend 100% of the value of every NFT. The $1 eth lending fee means the protocol is earning 13% APR on its NFT loans.
+    The floor price should be UP ONLY as revenues get added to it. Want your money back, take out a loan and let it get liquidated.</p>
+   <h1>Future Revenues</h1>
+     <p>Listing fees on our NFT marketplace<br />
+     Extending lending to other NFT projects<br />
+     Loan fees and liquidations<br />
+     Stablecoin investments<br />
+     Selling liquidated NFTs , Sales Royalties<br />
+     Future products 
+     </p>
      <h1>Utility</h1>
      <p>Whitelisted to future NFT releases<br />
     Lend 100% of floor(treasury) value of NFT - the treasury should increase over time.</p>        
      <h1>Future Revenues</h1>
      <p>Listing fees on our NFT marketplace<br />
      Extending lending to other NFT projects<br />
-     Future : NFT Stablecoin / Remitance, Lotto ?</p>
+     Future : NFT Stablecoin / Remitance, Unstablecoin ...... </p>
+     <h1>Developer and Contracts</h1>
+     <p>Developed by JollibΞΞ @pcashpeso<br /></p>
+
      </div>
     </Route>
  <Route exact path="/forsale">
-     <div>Liquidated NFTs for sale</div>
+ <div style={{ width: 480, margin: "auto", backgroundColor: "Off-White", border:2}}>
 
-     <Divider />
-
-<h2>Market balance is {  s_total_nfts && s_total_nfts.toString()} {marketAddy} nftSALE ID is {saleNFTID}</h2>
-<button >Test</button><br />
-
-
- DAI owned by protocol ${s_total_usdc && ethers.utils.formatEther(s_total_usdc)}<br />
- <h2>For Sale</h2>
-<h2>MarketPlace</h2> 
+<h2>MarketPlace</h2><p>Enter the ID of your NFT and the price in DAI that you want to sell it for. There is a 0.0006 ETH lsiting fee to sell your NFT, you will receive 100% of the sale price.</p>
 <InputNumber min={1} max={151} placeholder={"NFT ID"} onChange={onChange2} style={{ width: 200 }} /><br />
-<InputNumber min={1} placeholder={"Sale Price in Dai/USD"} onChange={onChange3} style={{ width: 200 }} /><br />
-<Button onClick={() => {tx( writeContracts.Floor101.approve(readContracts.Marketplace.address, NFTid));}}> APPROVE </Button>
-<Button onClick={() =>{tx( writeContracts.Marketplace.listSale(NFTid, nftSalePrice ,{value: ethers.utils.parseEther("0.0006")}));}}>
+<InputNumber min={1} placeholder={"Sale Price in Dai/USD"} onChange={onChange3} style={{ width: 200,margin:5 }} /><br />
+<Button type="primary" shape="round"  onClick={() =>{tx( writeContracts.Floor101.approve(readContracts.Marketplace.address, NFTid));}}> APPROVE </Button>{' '}
+<Button type="primary" shape="round"  onClick={() =>{tx( writeContracts.Marketplace.listSale(NFTid, ethers.utils.parseEther(nftSalePrice + "") ,{value: ethers.utils.parseEther("0.0006")}));}}>
 SELL NFT</Button>
 
+<h2>For Sale</h2>
+<div style={{ width: 480, margin: "auto", backgroundColor: "Off-White", border:2}}>
+<List dataSource={nftSales} renderItem={item => {
+                    const id = item.id.toNumber();
+                    return (
+<List.Item>
+<img src= {item.image} /><br /> 
+NFT ID : {id}<br /> 
+SALE Price : { ethers.utils.formatEther( item.price ) } DAI <br />
+<Button type="primary" shape="round" onClick={() => {tx( writeContracts.Dai.approve(readContracts.Marketplace.address,  ethers.utils.parseEther(item.price + "")) );}}> APPROVE </Button>{' '}
+<Button type="primary" shape="round" onClick={() =>{tx( writeContracts.Marketplace.buyNft(id));}}>
+Buy NFT</Button>
+</List.Item>
+);}}/>
+</div>
+
+<List bordered dataSource={listSaleEvents}   
+                renderItem={item => {
+                  return (
+                    <List.Item key={item[0] }>
+                      <span style={{ fontSize: 16, marginRight: 8 }}>NFTID #{item.args[1].toNumber()}</span>
+                      <span style={{ fontSize: 16, marginRight: 8 }}>Price ${ ethers.utils.formatEther( item.args[2] ) }</span><br />
+                      Address {item.args[0]}  
+
+
+                    </List.Item>
+                  );
+                }}
+              />
+
+<div>BUY NFT EVENT</div>
+<List bordered dataSource={buyNftEvent}   
+                renderItem={item => {
+                  return (
+                    <List.Item key={item[0] }>
+                      <span style={{ fontSize: 16, marginRight: 8 }}>NFTID #{item.args[0].toNumber()}</span>
+                      <span style={{ fontSize: 16, marginRight: 8 }}>Price ${ ethers.utils.formatEther( item.args[2] ) }</span><br />
+                      Address {item.args[1]}  
+
+
+                    </List.Item>
+                  );
+                }}
+              />
+</div>           
  </Route>
         </Switch>
       </BrowserRouter>
@@ -764,3 +841,4 @@ SELL NFT</Button>
 }
 
 export default App;
+
