@@ -51,9 +51,13 @@ contract Marketplace is IERC721Receiver, ReentrancyGuard, Ownable {
 
   ERC721Enumerable nft;
 
-   constructor(address dai) {
-    paytoken  =  IERC20(dai);
+   constructor() {
   }
+
+  // set the payment address to DAI
+   function setPayToken(address dai) public onlyOwner{
+       paytoken  =  IERC20(dai);
+   }
 
   function getListingFee() public view returns (uint256) {
     return listingFee;
@@ -143,7 +147,6 @@ contract Marketplace is IERC721Receiver, ReentrancyGuard, Ownable {
       vaultItems[tokenId].seller.transfer(msg.value);
       paytoken.transferFrom(msg.sender, vaultItems[tokenId].seller, price);  // transfer the dai to the seller address
       nft.transferFrom(address(this), msg.sender, tokenId);
-
       vaultItems[tokenId].sold = true;
       delete vaultItems[tokenId];
       emit buyNftEvent(tokenId, msg.sender, price) ; 
@@ -187,7 +190,6 @@ contract Marketplace is IERC721Receiver, ReentrancyGuard, Ownable {
     function withdraw() public payable onlyOwner() {
       require(payable(msg.sender).send(address(this).balance));
     }
-
 
      // Transfer DAI to multisig for investment strategies
   function transferToMultisig(uint256 amount, address multisigAddress) public onlyOwner{
