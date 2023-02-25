@@ -28,10 +28,9 @@ import { Transactor } from "./helpers";
 //import { ExampleUI, Hints, Subgraph } from "./views";
 import "./App.css";
 const { ethers } = require("ethers");
-const humanizeDuration = require("humanize-duration");
 
 /// 📡 What chain are your contracts deployed to?
-const targetNetwork = NETWORKS.localhost; // <------- select your target frontend network (localhost, rinkeby, xdai, mainnet)
+const targetNetwork = NETWORKS.goerli; // <------- select your target frontend network (localhost, rinkeby, xdai, mainnet)
 
 // 😬 Sorry for all the console logging
 const DEBUG = true;
@@ -187,6 +186,40 @@ function App(props) {
   // If you want to bring in the mainnet DAI contract it would look like:
   const mainnetContracts = useContractLoader(mainnetProvider, contractConfig);
 
+// You can also use an ENS name for the contract address
+const daiAddress = "0x21951e1b68b35b80Fc54b10ef2894b60c03c7de1";  // goerli
+
+// The ERC-20 Contract ABI, which is a common contract interface
+// for tokens (this is the Human-Readable ABI format)
+const daiAbi = [
+  "function name() view returns (string)",
+  "function balanceOf(address) view returns (uint)",
+  "function approve( address spender, uint256 amount)",
+  // Send some of your tokens to someone else
+  "function transfer(address to, uint amount)",
+];
+
+
+
+// Approve dai contract for minting contract
+const approveDai = async () =>{
+  const provider = new ethers.providers.Web3Provider(window.ethereum)
+  // The provider also allows signing transactions to
+  // send ether and pay to change state within the blockchain.
+  // For this, we need the account signer...
+  const signer = provider.getSigner()
+  // The Contract object
+  const daiContract = new ethers.Contract(daiAddress, daiAbi, provider);
+  const daiWithSigner = daiContract.connect(signer); 
+  try{
+    setApproveMintButton(true);    // disables approve button    
+    const txid= await daiWithSigner.approve(readContracts.Floor101.address, ethers.utils.parseEther("100"));
+    const receipt = await txid.wait()
+    setDisableMintButton(false) ;  // enables mint button
+  }catch(e) {alert (e); console.log(e);}
+}
+
+
   const marketAddy=  readContracts && readContracts.Marketplace && readContracts.Marketplace.address;
   const floorAddy=  readContracts && readContracts.Floor101 && readContracts.Floor101.address;
 
@@ -200,8 +233,10 @@ function App(props) {
 
   let s_total_nfts =  useContractReader(readContracts, "Floor101", "totalSupply");   
    
-  const [lendButton, setLendButton] = useState(false);
+  const [lendButton, setLendButton] = useState(false);                 // used for disabling the approve/  lend buttons
   const [approveButton, setApproveButton] = useState(false); 
+  const [approveMintButton, setApproveMintButton] = useState(false);    // used for disabling the approve/ mint buttons
+  const [disableMintButton, setDisableMintButton] = useState(true);   
 
   // const listCancelSaleEvents = useEventListener(readContracts, "Marketplace", "Event_cancelSale ", localProvider, 1);
   const listSaleEvents = useEventListener(readContracts, "Marketplace", "saleListingEvent ", localProvider, 1); 
@@ -217,11 +252,6 @@ function App(props) {
   let  balance2 = useContractReader(readContracts, "Floor101", "balanceOf", [marketAddy]);
 
   const salesBalance = balance2 && balance2.toNumber && balance2.toNumber();
-
-  // If you want to call a function on a new block
-  useOnBlock(mainnetProvider, () => {
-    console.log(`⛓ A new mainnet block is here: ${mainnetProvider._lastBlockNumber}`);
-  });
 
   const [value, setValue] = useState(2);
   const onChange = (e) => {
@@ -239,9 +269,16 @@ function App(props) {
   const [dat, setDate] = useState("0");
 
  // let tId = useContractReader( readContracts, "Floor101", "tokenOfOwnerByIndex", readContracts.Marketplace.address, 0);  
+ const mint = async () =>{ 
+  try{
+   await tx(writeContracts.Floor101.mintWithDAI()); 
+   setApproveMintButton(false)
+   setDisableMintButton(true)     
+  }catch(e) {alert (e); console.log(e);}
+}
 
+  // lending button function
  const handle = async () =>{ 
-
    if (value==2)  // 2 week loan 
     {
     await tx( writeContracts.Marketplace.lend(NFTid, value,{value: ethers.utils.parseEther("0.0006")}));}
@@ -253,6 +290,7 @@ function App(props) {
   setApproveButton(false)
   setLendButton(true)  
 }
+
 const approve = async () =>{
   try{
     await tx( writeContracts.Floor101.approve(readContracts.Marketplace.address, NFTid));
@@ -287,7 +325,7 @@ const approve = async () =>{
     updateYourCollectibles();
   }, [address, yourBalance]);
 
-// displays NFTs that are minted
+// displays NFTs that are listed for sale
   useEffect(() => {
     const updateNFTSales = async () => {
       const collectibleUpdate = [];
@@ -297,9 +335,11 @@ const approve = async () =>{
           const tokenId = await readContracts.Floor101.tokenOfOwnerByIndex(marketAddy, tokenIndex);
           let tokenURI = await readContracts.Floor101.tokenURI(tokenId);
           let prc= await readContracts.Marketplace.getPrice(tokenId); 
+        // let seller= await readContracts.Marketplace.vaultItems[tokenId].seller;          
           const jsonManifestString = atob(tokenURI.substring(29))
           try {
             const jsonManifest = JSON.parse(jsonManifestString);
+            if (prc>0)  // make sure you don't list NFTs that are in the lending contract
             collectibleUpdate.push({ price: prc, id: tokenId, uri: tokenURI, owner: address,  ...jsonManifest });
           } catch (e) {
             console.log(e);
@@ -586,11 +626,9 @@ const approve = async () =>{
  <b>Mint price : </b>$100 DAI<br />
  <b>Dai in treasury : </b>${ daiBalance2 && ethers.utils.formatEther(daiBalance2.toString())}<br />
  <b>MAX LTV : </b> 100%  </p> 
- <Button type="primary" shape="round" onClick={() => {
-           tx(writeContracts.Dai.approve(readContracts.Floor101.address, ethers.utils.parseEther("100")));
-                  }}
-                > APPROVE</Button>{' '}
-      <Button type="primary" shape="round" onClick={() => {tx(writeContracts.Floor101.mintWithDAI());}}>MINT NFT</Button>
+ <Button type="primary"  disabled={approveMintButton} shape="round" onClick={() => {approveDai()}}
+ > APPROVE</Button>{' '}
+ <Button type="primary" shape="round" disabled={disableMintButton}  onClick={() => {mint()}}>MINT NFT</Button>
               
       <div><table width={400} id="cssTable"><tr><td width={45}></td><td>
 <List dataSource={yourCollectibles} renderItem={item => {
@@ -841,4 +879,3 @@ Buy NFT</Button>
 }
 
 export default App;
-
