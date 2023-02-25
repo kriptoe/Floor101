@@ -24,7 +24,7 @@ contract Floor101 is ERC721Enumerable, Ownable  {
 
    address private immutable  marketContractAddress ;//  = IERC20(mumbaiDaiAddress);   
    // address private immutable multisigAddress =0xD530D1FC928a6ff4776eC5Fc38907D1af3fB7B73;
-   address private immutable daiAddress = 0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063;
+   // address private daiAddress = 0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063;
    string public nftMessage;
 
   mapping (uint => SVGParams) public nftOwners;       // mapping to struct
@@ -50,11 +50,16 @@ function getNFT(uint _memberId) public view returns(SVGParams memory) {
 // -------------------------EVENTS -------------------------------
    event mintEvent(address indexed sender, uint256 NFTid);
 
-   constructor(address dai, address market) ERC721("Floor101", "flr") {
-       paytoken  =  IERC20(dai);
+   constructor(address market) ERC721("Floor101", "flr") {
        marketContractAddress=  market; 
        nftMessage  = "NOL - NFT owned liquidity";
      }
+
+  // set the payment address to DAI
+   function setPayToken(address dai) public onlyOwner{
+       paytoken  =  IERC20(dai);
+   }
+
 
     // mints a FLoor101 NFT
    function mintWithDAI() public payable {
@@ -62,7 +67,7 @@ function getNFT(uint _memberId) public view returns(SVGParams memory) {
         revert maxMint();
       if (paytoken.balanceOf(msg.sender ) < floorPrice)
         revert needMoreDai(); 
-      if(msg.sender != 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266)    // developer can mint more than 1 nft but still has to pay for it
+      if(msg.sender != 0x88b74128df7CB82eB7C2167e89946f83FFC907E9)    // developer can mint more than 1 nft but still has to pay for it
        require(balanceOf(msg.sender) < 1, "Can only mint 1 NFT per address");
       paytoken.transferFrom(msg.sender, address(this), floorPrice);
       _tokenIds.increment();   
